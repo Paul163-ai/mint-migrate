@@ -2,7 +2,7 @@
 
 A GTK4 GUI for backing up and restoring a Linux Mint system — home folder, installed packages, desktop settings, and system config — all into a single zip archive.
 
-![Mint Migration Tool](mint-migrate.png)
+![Mint Migration Tool](screenshot.png)
 
 ## Features
 
