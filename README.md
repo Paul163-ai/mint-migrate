@@ -16,7 +16,9 @@ A GTK4 GUI for backing up and restoring a Linux Mint system — home folder, ins
 
 ### Option A — .deb package (recommended)
 
-Download the latest `.deb` from the [Releases page](https://github.com/Paul163-ai/mint-migrate/releases/latest), then:
+**[Download mint-migrate_1.1_all.deb](https://github.com/Paul163-ai/mint-migrate/releases/download/v1.1/mint-migrate_1.1_all.deb)**
+
+Or browse the [Releases page](https://github.com/Paul163-ai/mint-migrate/releases/latest), then:
 
 ```bash
 sudo dpkg -i mint-migrate_1.1_all.deb
