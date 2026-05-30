@@ -61,16 +61,23 @@ def get_dir_size_fast(path: Path) -> int:
     try:
         r = subprocess.run(["du", "-sb", str(path)],
                            capture_output=True, text=True, timeout=5)
+        if r.returncode != 0 or not r.stdout.strip():
+            return 0
         return int(r.stdout.split()[0])
     except Exception:
         return 0
 
 
 def should_exclude(path: Path, extra_excludes: set) -> bool:
+    parts = path.parts
     s = str(path)
     for pat in ALWAYS_EXCLUDE:
-        if pat in s:
-            return True
+        if "/" in pat:
+            if pat in s:
+                return True
+        else:
+            if pat in parts:
+                return True
     for exc in extra_excludes:
         if exc in s:
             return True
@@ -426,7 +433,7 @@ class BackupPage(Gtk.Box):
                             zf.write(f, f"migration/system{f}")
                             log(f"  ✔ {f}", "ok")
                             stats["files"] += 1
-                        except PermissionError:
+                        except (PermissionError, OSError):
                             log(f"  ⚠ Permission denied: {f}", "warn")
                     else:
                         log(f"  → Would back up {f}", "info")
@@ -467,14 +474,14 @@ class BackupPage(Gtk.Box):
                                 zf.write(src_p, "migration/apt/sources.list")
                                 log(f"  ✔ {src_p}", "ok")
                                 stats["files"] += 1
-                            except PermissionError:
+                            except (PermissionError, OSError):
                                 log(f"  ⚠ Permission denied: {src_p}", "warn")
                         sources_d = Path("/etc/apt/sources.list.d")
                         if sources_d.exists():
                             for f in sources_d.glob("*.list"):
                                 try:
                                     zf.write(f, f"migration/apt/sources.list.d/{f.name}")
-                                except PermissionError:
+                                except (PermissionError, OSError):
                                     pass
                     else:
                         log("  → Would back up apt sources", "info")
@@ -548,6 +555,7 @@ class RestorePage(Gtk.Box):
         self._running = False
         self._zip_path = None
         self._zip_contents = {}   # section -> bool (present in zip)
+        self._contents_rows = []  # ActionRows added to _contents_group
         self._build_ui()
 
     def _build_ui(self):
@@ -646,7 +654,6 @@ class RestorePage(Gtk.Box):
         f = Gtk.FileFilter()
         f.set_name("Zip archives")
         f.add_pattern("*.zip")
-        filters = Gio_FileFilterList()
         dialog.set_default_filter(f)
         dialog.open(self._window, None, self._on_zip_chosen)
 
@@ -657,17 +664,17 @@ class RestorePage(Gtk.Box):
                 self._zip_path = file.get_path()
                 self._zip_row.set_title(Path(self._zip_path).name)
                 self._zip_row.set_subtitle(self._zip_path)
-                threading.Thread(target=self._inspect_zip, daemon=True).start()
+                threading.Thread(target=self._inspect_zip, args=(self._zip_path,), daemon=True).start()
         except GLib.Error:
             pass
 
-    def _inspect_zip(self):
+    def _inspect_zip(self, zip_path):
         contents = {
             "home": False, "packages": False, "dconf": False,
             "sys_hosts": False, "sys_fstab": False, "sys_cron": False,
         }
         try:
-            with zipfile.ZipFile(self._zip_path, "r") as zf:
+            with zipfile.ZipFile(zip_path, "r") as zf:
                 names = zf.namelist()
                 if any(n.startswith("home/") for n in names):
                     contents["home"] = True
@@ -684,14 +691,18 @@ class RestorePage(Gtk.Box):
         except Exception as e:
             GLib.idle_add(self._log_widget.log, f"  ✘ Could not read zip: {e}", "err")
             return
-        GLib.idle_add(self._update_contents_ui, contents)
+        GLib.idle_add(self._update_contents_ui, contents, zip_path)
 
-    def _update_contents_ui(self, contents):
+    def _update_contents_ui(self, contents, zip_path):
+        if zip_path != self._zip_path:
+            return  # stale result from a superseded inspection
+
         self._zip_contents = contents
 
-        # Clear old rows
-        for row in list(self._contents_group):
+        # Remove previously added rows
+        for row in self._contents_rows:
             self._contents_group.remove(row)
+        self._contents_rows.clear()
         if hasattr(self, "_contents_placeholder"):
             try:
                 self._contents_group.remove(self._contents_placeholder)
@@ -713,7 +724,10 @@ class RestorePage(Gtk.Box):
             if not present:
                 self._restore_checks[key].set_active(False)
                 self._restore_checks[key].set_sensitive(False)
+            else:
+                self._restore_checks[key].set_sensitive(True)
             self._contents_group.add(row)
+            self._contents_rows.append(row)
 
         self._dry_btn.set_sensitive(True)
         self._restore_btn.set_sensitive(True)
@@ -774,18 +788,16 @@ class RestorePage(Gtk.Box):
             prog(done[0] / max(steps, 1), label, status)
 
         def sudo_cp(src_in_zip, dest):
-            """Extract file from zip to a temp location then sudo cp to dest."""
             if dry:
                 log(f"  → Would restore {dest}", "info")
                 return True
+            tmp_path = None
             try:
-                with zipfile.ZipFile(opts["zip_path"]) as zf:
-                    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-                        tmp.write(zf.read(src_in_zip))
-                        tmp_path = tmp.name
+                with tempfile.NamedTemporaryFile(delete=False) as tmp:
+                    tmp_path = tmp.name
+                    tmp.write(zf.read(src_in_zip))
                 r = subprocess.run(["pkexec", "cp", tmp_path, dest],
                                    capture_output=True, text=True)
-                Path(tmp_path).unlink(missing_ok=True)
                 if r.returncode == 0:
                     log(f"  ✔ {dest}", "ok")
                     return True
@@ -795,6 +807,9 @@ class RestorePage(Gtk.Box):
             except Exception as e:
                 log(f"  ✘ Error restoring {dest}: {e}", "err")
                 return False
+            finally:
+                if tmp_path is not None:
+                    Path(tmp_path).unlink(missing_ok=True)
 
         try:
             with zipfile.ZipFile(opts["zip_path"], "r") as zf:
@@ -846,9 +861,6 @@ class RestorePage(Gtk.Box):
                     if not dry:
                         try:
                             pkg_data = zf.read("migration/packages.txt").decode()
-                            with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as tmp:
-                                tmp.write(pkg_data)
-                                tmp_path = tmp.name
 
                             log("  → Running dpkg --set-selections (needs sudo)…", "info")
                             r1 = subprocess.run(
@@ -870,7 +882,6 @@ class RestorePage(Gtk.Box):
                             else:
                                 log(f"  ⚠ apt-get: {r2.stderr.strip()[:200]}", "warn")
 
-                            Path(tmp_path).unlink(missing_ok=True)
                         except Exception as e:
                             log(f"  ✘ Package restore failed: {e}", "err")
                     else:
@@ -953,11 +964,6 @@ class RestorePage(Gtk.Box):
         )
         d.add_response("ok", "OK")
         d.present(self._window)
-
-
-# Stub to avoid NameError — Gtk.FileDialog doesn't need ListModel for single filter
-def Gio_FileFilterList():
-    return None
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
