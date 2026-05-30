@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Mint Migration Tool
+Comment=Back up and restore your Linux Mint system
+Exec=/usr/local/bin/mint-migrate
+Icon=mint-migrate
+Terminal=false
+Categories=System;Utility;Archiving;
+Keywords=backup;restore;migrate;migration;mint;
+StartupNotify=true
+StartupWMClass=mint-migrate
