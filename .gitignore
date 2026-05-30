@@ -1,2 +1,3 @@
 *.deb
 CLAUDE.md
+.claude/
