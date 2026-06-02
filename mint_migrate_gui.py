@@ -272,6 +272,7 @@ class BackupPage(Gtk.Box):
             ("sys_hosts", "/etc/hosts & hostname",     "Custom host entries and machine name",                    True),
             ("sys_fstab", "/etc/fstab",                "Drive mounts — OFF by default, UUIDs differ on new hardware", False),
             ("sys_cron",  "/etc/crontab & timezone",   "Scheduled tasks and timezone setting",                    True),
+            ("claude",    "Claude Code settings & memory", "~/.claude — AI assistant memory, hooks and config",      True),
         ]:
             row = Adw.SwitchRow(title=title, subtitle=subtitle)
             row.set_active(default)
@@ -378,6 +379,7 @@ class BackupPage(Gtk.Box):
             "sys_hosts":    self._checks["sys_hosts"].get_active(),
             "sys_fstab":    self._checks["sys_fstab"].get_active(),
             "sys_cron":     self._checks["sys_cron"].get_active(),
+            "claude":       self._checks["claude"].get_active(),
             "extra":        self._extra_entry.get_text().strip().split() if self._extra_entry.get_text().strip() else [],
             "excluded":     excluded,
             "dry_run":      dry_run,
@@ -410,6 +412,11 @@ class BackupPage(Gtk.Box):
                 p = HOME / f
                 if p.exists():
                     items.append((p, f"home/{f}"))
+        if opts["claude"]:
+            p = HOME / ".claude"
+            if p.exists():
+                items.append((p, "home/.claude"))
+
         for extra in opts["extra"]:
             p = Path(extra).expanduser()
             if not p.is_absolute():
@@ -442,7 +449,7 @@ class BackupPage(Gtk.Box):
             ZipCls = _DummyZip if dry else lambda p: zipfile.ZipFile(p, "w", zipfile.ZIP_DEFLATED, compresslevel=6)
             with ZipCls(zip_path) as zf:
 
-                if opts["home_dirs"] or opts["extra"]:
+                if items:
                     log("\n📁  Home folder & dotfiles", "section")
                     for src, arc in items:
                         label = str(src.relative_to(HOME)) if src.is_relative_to(HOME) else str(src)
@@ -606,6 +613,7 @@ class RestorePage(Gtk.Box):
             ("sys_hosts","Hosts & hostname",          "Restores /etc/hosts and /etc/hostname (needs sudo)", True),
             ("sys_fstab","fstab",                     "Drive mounts — OFF by default, UUIDs differ on new hardware", False),
             ("sys_cron", "Crontab & timezone",        "Restores /etc/crontab and /etc/timezone (needs sudo)", True),
+            ("claude",   "Claude Code settings & memory", "Restores ~/.claude — AI assistant memory, hooks and config", True),
         ]:
             row = Adw.SwitchRow(title=title, subtitle=subtitle)
             row.set_active(default)
@@ -672,6 +680,7 @@ class RestorePage(Gtk.Box):
         contents = {
             "home": False, "packages": False, "dconf": False,
             "sys_hosts": False, "sys_fstab": False, "sys_cron": False,
+            "claude": False,
         }
         try:
             with zipfile.ZipFile(zip_path, "r") as zf:
@@ -688,6 +697,8 @@ class RestorePage(Gtk.Box):
                     contents["sys_fstab"] = True
                 if any("system/etc/crontab" in n for n in names):
                     contents["sys_cron"] = True
+                if any(n.startswith("home/.claude/") for n in names):
+                    contents["claude"] = True
         except Exception as e:
             GLib.idle_add(self._log_widget.log, f"  ✘ Could not read zip: {e}", "err")
             return
@@ -716,6 +727,7 @@ class RestorePage(Gtk.Box):
             "sys_hosts": ("⚙️", "/etc/hosts & hostname"),
             "sys_fstab": ("⚙️", "/etc/fstab"),
             "sys_cron":  ("⚙️", "/etc/crontab & timezone"),
+            "claude":    ("🤖", "Claude Code settings & memory"),
         }
         for key, (icon, label) in labels.items():
             present = contents.get(key, False)
@@ -766,6 +778,7 @@ class RestorePage(Gtk.Box):
             "sys_hosts": self._restore_checks["sys_hosts"].get_active(),
             "sys_fstab": self._restore_checks["sys_fstab"].get_active(),
             "sys_cron":  self._restore_checks["sys_cron"].get_active(),
+            "claude":    self._restore_checks["claude"].get_active(),
         }
         threading.Thread(target=self._thread, args=(opts,), daemon=True).start()
 
@@ -827,6 +840,8 @@ class RestorePage(Gtk.Box):
                             rel = name[len("home/"):]
                             if not rel:
                                 continue
+                            if rel.startswith(".claude/") and not opts["claude"]:
+                                continue
                             dest = HOME / rel
                             try:
                                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -852,7 +867,9 @@ class RestorePage(Gtk.Box):
                             gnupg_dir.chmod(0o700)
                             log("  ✔ GPG permissions fixed (700)", "ok")
                     else:
-                        log(f"  → Would restore {len(home_files):,} files to ~/", "info")
+                        effective = [n for n in home_files
+                                     if not (n[len("home/"):].startswith(".claude/") and not opts["claude"])]
+                        log(f"  → Would restore {len(effective):,} files to ~/", "info")
 
                 # ── Packages ──────────────────────────────────────────────────
                 if opts["packages"] and "migration/packages.txt" in names:
