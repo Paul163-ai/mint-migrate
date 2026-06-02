@@ -10,18 +10,19 @@ A GTK4 GUI for backing up and restoring a Linux Mint system — home folder, ins
 - **Restore** — extracts everything back on a new machine; system files written via polkit (no terminal needed)
 - **Dry run** — preview exactly what will be backed up or restored without touching any files
 - **Smart exclusions** — caches, `node_modules`, browser caches always excluded; large reinstallable folders (Steam, flatpak, VirtualBox, etc.) off by default with per-folder toggles
+- **Claude Code** — backs up and restores `~/.claude` (AI assistant memory, hooks and config)
 - **Extra paths** — add any additional home folder paths to the backup
 
 ## Install
 
 ### Option A — .deb package (recommended)
 
-**[Download mint-migrate_1.1_all.deb](https://github.com/Paul163-ai/mint-migrate/releases/download/v1.1/mint-migrate_1.1_all.deb)**
+**[Download mint-migrate_1.2_all.deb](https://github.com/Paul163-ai/mint-migrate/releases/download/v1.2/mint-migrate_1.2_all.deb)**
 
 Or browse the [Releases page](https://github.com/Paul163-ai/mint-migrate/releases/latest), then:
 
 ```bash
-sudo dpkg -i mint-migrate_1.1_all.deb
+sudo dpkg -i mint-migrate_1.2_all.deb
 ```
 
 Then find **Mint Migration Tool** in your application menu.
